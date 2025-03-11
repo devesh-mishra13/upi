@@ -1,103 +1,181 @@
-import Image from "next/image";
+"use client"; // Ensure it's a Client Component in Next.js
+
+import { useState, useEffect } from "react";
+import { Bar, Pie } from "react-chartjs-2";
+import {
+  Chart as ChartJS,
+  BarElement,
+  ArcElement,
+  Tooltip,
+  Legend,
+  CategoryScale,
+  LinearScale,
+} from "chart.js";
+
+import { pipe, flow } from "fp-ts/function";
+import * as O from "fp-ts/Option";
+import {produce} from "immer";
+
+// ✅ Register Chart.js components
+ChartJS.register(BarElement, ArcElement, Tooltip, Legend, CategoryScale, LinearScale);
+
+const getCurrentMonth = () => new Date().toISOString().slice(0, 7); // YYYY-MM
+
+type Transaction = { id: number; amount: number; category: string; date: string };
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [newTransaction, setNewTransaction] = useState({
+    amount: "",
+    category: "",
+    date: getCurrentMonth(),
+  });
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    const savedTransactions = JSON.parse(localStorage.getItem("transactions") || "[]");
+    setTransactions(savedTransactions);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("transactions", JSON.stringify(transactions));
+  }, [transactions]);
+
+  const addTransaction = () => {
+    if (!newTransaction.amount || !newTransaction.category) return;
+
+    setTransactions(
+      produce((draft: Transaction[]) => {
+        draft.push({
+          id: Date.now(),
+          amount: Number(newTransaction.amount),
+          category: newTransaction.category,
+          date: newTransaction.date,
+        });
+      })
+    );
+
+    setNewTransaction({ amount: "", category: "", date: getCurrentMonth() });
+  };
+
+  // ✅ Functional Programming: Using `Option` to safely handle data
+  const filteredTransactions: Transaction[] = pipe(
+    O.fromNullable(transactions as Transaction[]), // Explicitly set type
+    O.map((txs) => txs.filter((tx) => tx.date.startsWith(selectedMonth))),
+    O.getOrElse<Transaction[]>(() => []) // Ensure correct fallback type
+  );
+  
+
+  const categoryTotals: Record<string, number> = pipe(
+    O.fromNullable(filteredTransactions),
+    O.map((txs) =>
+      txs.reduce(
+        (acc, tx) => ({
+          ...acc,
+          [tx.category]: (acc[tx.category] || 0) + tx.amount,
+        }),
+        {} as Record<string, number>
+      )
+    ),
+    O.getOrElse(() => ({}))
+  );
+
+  const totalSpending: number = pipe(
+    O.fromNullable(filteredTransactions),
+    O.map((txs) => txs.reduce((sum, tx) => sum + tx.amount, 0)),
+    O.getOrElse(() => 0)
+  );
+
+  return (
+    <div className="flex flex-col items-center p-6">
+      <h1 className="text-2xl font-bold mb-4">UPI Insights</h1>
+
+      {/* Add Transaction Form */}
+      <div className="mb-4 p-4 border rounded-lg shadow-md w-96">
+        <h2 className="text-lg font-semibold mb-2">Add Transaction</h2>
+        <input
+          type="number"
+          placeholder="Amount"
+          value={newTransaction.amount}
+          onChange={(e) => setNewTransaction({ ...newTransaction, amount: e.target.value })}
+          className="border p-2 w-full mb-2"
+        />
+        <input
+          type="text"
+          placeholder="Category"
+          value={newTransaction.category}
+          onChange={(e) => setNewTransaction({ ...newTransaction, category: e.target.value })}
+          className="border p-2 w-full mb-2"
+        />
+        <input
+          type="month"
+          value={newTransaction.date}
+          onChange={(e) => setNewTransaction({ ...newTransaction, date: e.target.value })}
+          className="border p-2 w-full mb-2"
+        />
+        <button onClick={addTransaction} className="bg-blue-500 text-white px-4 py-2 w-full">
+          Add
+        </button>
+      </div>
+
+      {/* Month Filter */}
+      <select
+        value={selectedMonth}
+        onChange={(e) => setSelectedMonth(e.target.value)}
+        className="mb-4 p-2 border rounded"
+      >
+        {Array.from(new Set(transactions.map((tx) => tx.date))).map((month) => (
+          <option key={month} value={month}>
+            {month}
+          </option>
+        ))}
+      </select>
+
+      {/* Total Spending */}
+      <h2 className="text-xl font-semibold mb-4">Total Spending: ₹{totalSpending}</h2>
+
+      {/* Charts */}
+      <div className="grid grid-cols-2 gap-6 w-2/3">
+        <div className="w-full">
+          <Bar
+            data={{
+              labels: Object.keys(categoryTotals),
+              datasets: [
+                {
+                  label: "Spending",
+                  data: Object.values(categoryTotals),
+                  backgroundColor: ["#FF6384", "#36A2EB", "#FFCE56"],
+                },
+              ],
+            }}
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+        <div className="w-full">
+          <Pie
+            data={{
+              labels: Object.keys(categoryTotals),
+              datasets: [
+                {
+                  data: Object.values(categoryTotals),
+                  backgroundColor: ["#FF6384", "#36A2EB", "#FFCE56"],
+                },
+              ],
+            }}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        </div>
+      </div>
+
+      {/* Transaction List */}
+      <div className="mt-6 w-96 border rounded-lg p-4 shadow-md">
+        <h2 className="text-lg font-semibold mb-2">Transactions</h2>
+        {filteredTransactions.map((tx) => (
+          <div key={tx.id} className="flex justify-between p-2 border-b">
+            <span>{tx.category}</span>
+            <span>₹{tx.amount}</span>
+            <span className="text-gray-500 text-sm">{tx.date}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
